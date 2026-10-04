@@ -1,0 +1,59 @@
+name: Sync API contract
+
+on:
+  repository_dispatch:
+    types: [gomad-api-contract-updated]
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate API contract event
+        env:
+          API_REPOSITORY: ${{ github.event.client_payload.api_repository }}
+          CONTRACT_SHA: ${{ github.event.client_payload.contract_sha }}
+          CONTRACT_DOCUMENT: ${{ github.event.client_payload.contract_document }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          import json
+          from pathlib import Path
+
+          if os.environ["API_REPOSITORY"] != "gomaddotid-commits/gomad-api":
+              raise SystemExit("Unexpected API repository in contract event.")
+          if not re.fullmatch(r"[0-9a-f]{40}", os.environ["CONTRACT_SHA"]):
+              raise SystemExit("The API contract event must include a full commit SHA.")
+
+          contract = os.environ["CONTRACT_DOCUMENT"]
+          if not contract or len(contract.encode()) > 65536:
+              raise SystemExit("The API contract is missing or exceeds the dispatch payload limit.")
+          try:
+              document = json.loads(contract)
+          except json.JSONDecodeError as error:
+              raise SystemExit("The API contract payload is not valid generated JSON.") from error
+          if (
+              not isinstance(document, dict)
+              or not str(document.get("openapi", "")).startswith("3.")
+              or not isinstance(document.get("paths"), dict)
+          ):
+              raise SystemExit("The API contract payload has an unexpected document shape.")
+
+          Path("contracts").mkdir(exist_ok=True)
+          Path("contracts/openapi.yaml").write_text(contract, encoding="utf-8")
+          PY
+      - name: Sync generated OpenAPI contract
+        run: |
+          if git diff --quiet -- contracts/openapi.yaml; then
+            echo "The checked-in API contract is already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add contracts/openapi.yaml
+          git commit -m "Sync generated GoMad API contract"
+          git push
