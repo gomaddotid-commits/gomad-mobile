@@ -1,0 +1,22 @@
+name: gomad_mobile
+description: Aplikasi GoMad untuk Android — alur pilot penumpang Mad Trans.
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: '>=3.8.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  dio: ^5.0.0
+  gomad_api:
+    path: api_client
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

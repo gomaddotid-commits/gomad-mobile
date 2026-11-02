@@ -1,6 +1,7 @@
 node_modules/
 .dart_tool/
 build/
+api_client/
 *.log
 .DS_Store
 Thumbs.db

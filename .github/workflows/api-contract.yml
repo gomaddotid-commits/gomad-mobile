@@ -3,6 +3,7 @@ name: Sync API contract
 on:
   repository_dispatch:
     types: [gomad-api-contract-updated]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -16,9 +17,11 @@ jobs:
         env:
           API_REPOSITORY: ${{ github.event.client_payload.api_repository }}
           CONTRACT_SHA: ${{ github.event.client_payload.contract_sha }}
-          CONTRACT_DOCUMENT: ${{ github.event.client_payload.contract_document }}
+          CONTRACT_GZIP_BASE64: ${{ github.event.client_payload.contract_gzip_base64 }}
         run: |
           python3 - <<'PY'
+          import base64
+          import gzip
           import os
           import re
           import json
@@ -29,9 +32,16 @@ jobs:
           if not re.fullmatch(r"[0-9a-f]{40}", os.environ["CONTRACT_SHA"]):
               raise SystemExit("The API contract event must include a full commit SHA.")
 
-          contract = os.environ["CONTRACT_DOCUMENT"]
-          if not contract or len(contract.encode()) > 65536:
-              raise SystemExit("The API contract is missing or exceeds the dispatch payload limit.")
+          encoded_contract = os.environ["CONTRACT_GZIP_BASE64"]
+          if not encoded_contract or len(encoded_contract) > 60000:
+              raise SystemExit("The compressed API contract is missing or exceeds the dispatch payload limit.")
+          try:
+              contract_bytes = gzip.decompress(base64.b64decode(encoded_contract, validate=True))
+              contract = contract_bytes.decode("utf-8")
+          except (ValueError, OSError, UnicodeDecodeError) as error:
+              raise SystemExit("The API contract payload is not valid gzip-compressed Base64.") from error
+          if len(contract_bytes) > 1_000_000:
+              raise SystemExit("The decompressed API contract exceeds the allowed size.")
           try:
               document = json.loads(contract)
           except json.JSONDecodeError as error:
@@ -57,3 +67,22 @@ jobs:
           git add contracts/openapi.yaml
           git commit -m "Sync generated GoMad API contract"
           git push
+      - name: Generate Dart client from the contract
+        run: |
+          # Klien Dart tidak pernah ditulis manual: kalau kontrak berubah dan
+          # generator gagal, pipeline ini merah sebelum aplikasi sempat rusak.
+          docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/local" \
+            openapitools/openapi-generator-cli:v7.10.0 generate \
+            -i /local/contracts/openapi.yaml \
+            -g dart-dio \
+            -o /local/api_client \
+            --skip-validate-spec \
+            --additional-properties=pubName=gomad_api,pubVersion=1.0.0,serializationLibrary=json_serializable,nullableFields=true
+          cd api_client
+          dart pub get
+          dart analyze lib > analyze.txt || true
+          if grep -q "^error" analyze.txt; then
+            cat analyze.txt
+            exit 1
+          fi
+          echo "Klien Dart dapat dikompilasi dari kontrak terbaru."
