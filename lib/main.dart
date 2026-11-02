@@ -2,15 +2,20 @@ import 'package:flutter/material.dart';
 
 import 'src/api_config.dart';
 import 'src/session.dart';
-import 'src/ui/home_page.dart';
+import 'src/theme/gomad_theme.dart';
 import 'src/ui/login_page.dart';
+import 'src/ui/shell/app_shell.dart';
+import 'src/workspace.dart';
 
 void main() {
   runApp(const GomadApp());
 }
 
-/// Kerangka aplikasi: satu sesi untuk seluruh aplikasi, halaman beranda
-/// bergantung pada status masuk.
+/// Kerangka aplikasi: satu sesi untuk seluruh aplikasi.
+///
+/// Tema ikut berubah bersama peran: penumpang memakai bahasa desain konsumen,
+/// peran kerja memakai operasional. Karena itu `MaterialApp` dibangun ulang saat
+/// sesi berubah — bukan hanya halaman di dalamnya.
 class GomadApp extends StatefulWidget {
   const GomadApp({super.key, this.session});
 
@@ -42,23 +47,20 @@ class _GomadAppState extends State<GomadApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'GoMad',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0B6E4F)),
-        useMaterial3: true,
-      ),
-      home: ListenableBuilder(
-        listenable: _session,
-        builder: (context, _) {
-          if (_session.isAuthenticated) {
-            return HomePage(session: _session);
-          }
+    return ListenableBuilder(
+      listenable: _session,
+      builder: (context, _) {
+        final workspace = Workspace.fromAccountType(_session.user?.accountType);
 
-          return LoginPage(session: _session);
-        },
-      ),
+        return MaterialApp(
+          title: 'GoMad',
+          debugShowCheckedModeBanner: false,
+          theme: GomadTheme.of(workspace.language),
+          home: _session.isAuthenticated
+              ? AppShell(session: _session)
+              : LoginPage(session: _session),
+        );
+      },
     );
   }
 }

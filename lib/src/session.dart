@@ -70,6 +70,7 @@ class Session extends ChangeNotifier {
   gomad.UserResource? _user;
   bool _busy = false;
   String? _error;
+  MfaChallenge? _pendingMfa;
 
   gomad.GomadApi get api => _api;
 
@@ -80,6 +81,13 @@ class Session extends ChangeNotifier {
   bool get isBusy => _busy;
 
   String? get error => _error;
+
+  /// Terisi bila server meminta kode verifikasi dua langkah (HTTP 428).
+  ///
+  /// Server menjawab 428 — bukan 200 dengan bentuk berbeda — supaya kontrak dan
+  /// klien hanya punya satu bentuk jawaban sukses. Aplikasi membaca tantangan
+  /// dari galat itu, lalu menukarnya lewat `/v1/auth/mfa/verify`.
+  MfaChallenge? get pendingMfa => _pendingMfa;
 
   String get baseUrl => _config.baseUrl;
 
@@ -107,6 +115,7 @@ class Session extends ChangeNotifier {
   Future<void> login({required String identity, required String password}) async {
     _busy = true;
     _error = null;
+    _pendingMfa = null;
     notifyListeners();
 
     try {
@@ -126,12 +135,86 @@ class Session extends ChangeNotifier {
       _user = data.user;
       await _applyTokens(AuthTokens(token: data.token, expiresAt: _parseDate(data.expiresAt)));
     } on DioException catch (error) {
+      final challenge = _mfaChallengeOf(error);
+      if (challenge != null) {
+        // Bukan kegagalan: kata sandi benar, tinggal kode. Layar masuk akan
+        // berganti ke formulir kode.
+        _pendingMfa = challenge;
+        return;
+      }
+
       _error = _messageOf(error);
       rethrow;
     } finally {
       _busy = false;
       notifyListeners();
     }
+  }
+
+  /// Menukar kode 6 angka dengan token akses.
+  Future<void> verifyMfa(String code) async {
+    final challenge = _pendingMfa;
+    if (challenge == null) {
+      return;
+    }
+
+    _busy = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final response = await _api.getAuthApi().v1AuthMfaVerify(
+            v1AuthMfaVerifyRequest: gomad.V1AuthMfaVerifyRequest(
+              mfaToken: challenge.token,
+              code: code.trim(),
+              deviceName: deviceName,
+            ),
+            extra: const {'gomad_skip_refresh': true},
+          );
+      final data = response.data?.data;
+      if (data == null) {
+        throw const SessionFailure('Respons verifikasi tidak dikenali.');
+      }
+
+      _user = data.user;
+      _pendingMfa = null;
+      await _applyTokens(AuthTokens(token: data.token, expiresAt: _parseDate(data.expiresAt)));
+    } on DioException catch (error) {
+      _error = _messageOf(error);
+      rethrow;
+    } finally {
+      _busy = false;
+      notifyListeners();
+    }
+  }
+
+  /// Membatalkan tantangan MFA: kembali ke formulir masuk.
+  void cancelMfa() {
+    _pendingMfa = null;
+    _error = null;
+    notifyListeners();
+  }
+
+  /// Tantangan MFA diambil dari jawaban 428 (`code = MFA_REQUIRED`).
+  MfaChallenge? _mfaChallengeOf(DioException error) {
+    if (error.response?.statusCode != 428) {
+      return null;
+    }
+
+    final data = error.response?.data;
+    if (data is! Map) {
+      return null;
+    }
+
+    final payload = data['data'];
+    if (payload is! Map || payload['mfa_token'] is! String) {
+      return null;
+    }
+
+    return MfaChallenge(
+      token: payload['mfa_token'] as String,
+      expiresAt: _parseDate(payload['expires_at'] as String?),
+    );
   }
 
   /// Memperpanjang token tanpa meminta kata sandi. Token lama untuk perangkat
@@ -196,6 +279,7 @@ class Session extends ChangeNotifier {
   Future<void> _forget() async {
     _tokens = null;
     _user = null;
+    _pendingMfa = null;
     _dio.options.headers.remove('Authorization');
     await _store.clear();
     notifyListeners();
@@ -238,4 +322,17 @@ class SessionFailure implements Exception {
 
   @override
   String toString() => message;
+}
+
+/// Tantangan verifikasi dua langkah yang menunggu kode dari email.
+///
+/// `token` adalah tiket sementara (bukan token akses) yang hanya bisa ditukar
+/// dengan kode yang dikirim server — tidak bisa dipakai memanggil endpoint lain.
+class MfaChallenge {
+  const MfaChallenge({required this.token, this.expiresAt});
+
+  final String token;
+  final DateTime? expiresAt;
+
+  bool get isExpired => expiresAt != null && expiresAt!.isBefore(DateTime.now());
 }

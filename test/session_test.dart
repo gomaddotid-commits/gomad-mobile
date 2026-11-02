@@ -46,6 +46,7 @@ Map<String, dynamic> userPayload([String name = 'Penumpang Uji']) {
     'name': name,
     'phone': '+6281234567890',
     'email': 'uji@gomad.test',
+    'account_type': 'customer',
     'phone_verified_at': null,
     'membership': null,
   };
@@ -75,6 +76,7 @@ void main() {
     adapter = FakeAdapter(
       (options, _) => jsonResponse({
         'data': {
+          'mfa_required': false,
           'token': 'token-awal',
           'expires_at': DateTime.now().add(const Duration(days: 30)).toIso8601String(),
           'user': userPayload(),
@@ -98,6 +100,7 @@ void main() {
       if (options.path == '/v1/auth/login') {
         return jsonResponse({
           'data': {
+            'mfa_required': false,
             'token': 'token-awal',
             'expires_at': DateTime.now().add(const Duration(days: 30)).toIso8601String(),
             'user': userPayload(),
@@ -145,6 +148,7 @@ void main() {
       if (options.path == '/v1/auth/login') {
         return jsonResponse({
           'data': {
+            'mfa_required': false,
             'token': 'token-awal',
             'expires_at': DateTime.now().add(const Duration(days: 30)).toIso8601String(),
             'user': userPayload(),
@@ -175,5 +179,50 @@ void main() {
 
     expect(soon.needsRefresh, isTrue);
     expect(later.needsRefresh, isFalse);
+  });
+
+  /**
+   * Server menjawab 428 bila akun memakai verifikasi dua langkah. Aplikasi harus
+   * membaca tantangan itu — bukan memperlakukannya sebagai sandi salah — lalu
+   * menukar kode dengan token lewat `/v1/auth/mfa/verify`.
+   */
+  test('login ber-MFA menunggu kode lalu menukarnya jadi token', () async {
+    adapter = FakeAdapter((options, _) {
+      if (options.path == '/v1/auth/login') {
+        return jsonResponse({
+          'message': 'Akun ini memakai verifikasi dua langkah.',
+          'code': 'MFA_REQUIRED',
+          'data': {
+            'mfa_required': true,
+            'mfa_token': 'tiket-sementara',
+            'expires_at': DateTime.now().add(const Duration(minutes: 10)).toIso8601String(),
+          },
+        }, status: 428);
+      }
+
+      return jsonResponse({
+        'data': {
+          'token': 'token-setelah-mfa',
+          'expires_at': DateTime.now().add(const Duration(days: 30)).toIso8601String(),
+          'user': userPayload(),
+        },
+      });
+    });
+    session = buildSession(adapter);
+
+    await session.login(identity: 'uji@gomad.test', password: 'rahasia-panjang');
+
+    expect(session.isAuthenticated, isFalse);
+    expect(session.pendingMfa?.token, 'tiket-sementara');
+
+    await session.verifyMfa('123456');
+
+    expect(session.pendingMfa, isNull);
+    expect(session.isAuthenticated, isTrue);
+    expect((await store.read())?.token, 'token-setelah-mfa');
+    expect(adapter.calls.last.path, '/v1/auth/mfa/verify');
+    final sent = jsonDecode(adapter.calls.last.data as String) as Map<String, dynamic>;
+    expect(sent['mfa_token'], 'tiket-sementara');
+    expect(sent['code'], '123456');
   });
 }
