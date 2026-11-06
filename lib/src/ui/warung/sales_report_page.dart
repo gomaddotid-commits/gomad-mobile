@@ -200,7 +200,6 @@ class _SaleCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final createdAt = sale.createdAt;
     final time = createdAt == null || createdAt.length < 16 ? '-' : asClock(createdAt.substring(11));
-    final items = sale.items ?? const <gomad.RetailSaleResourceItemsInner>[];
 
     return GmSurface(
       child: Column(
@@ -216,11 +215,11 @@ class _SaleCard extends StatelessWidget {
           ),
           const SizedBox(height: Uds.space1),
           Text(
-            '$time · ${sale.sellerName ?? 'kasir'} · ${items.length} barang',
+            '$time · ${sale.sellerName ?? 'kasir'} · ${sale.items.length} barang',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: Uds.space2),
-          for (final item in items)
+          for (final item in sale.items)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 2),
               child: Row(

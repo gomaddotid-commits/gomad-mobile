@@ -43,11 +43,32 @@ waktu dan cara menghindarinya:
 |---|---|---|
 | field boolean jadi `String` | nilai dihitung lewat `in_array()` / kondisi bercabang | tulis perbandingan satu per satu, bungkus `(bool)`, pindahkan ke method bertipe |
 | `id` jadi `Object?` | `$this->getKey()` tidak terbaca | `(int) $this->getKey()` |
-| respons jadi `anyOf` dan kelas yang terpilih salah | dua `return` berbeda bentuk pada status yang sama | satu status = satu bentuk (contoh: tantangan MFA login → `428`, bukan `200`) |
-| `GET` tak punya parameter padahal butuh `business_id` | id dibaca dari badan permintaan | jadikan bagian jalur: `/warung/businesses/{business}/pos` |
+| respons jadi `anyOf` dan kelas yang terpilih salah | dua `return` berbeda bentuk pada status yang sama | satu status = satu bentuk (contoh: tantangan MFA login → `428`, bukan `200`) || respons berubah bentuk setelah digabung | resource memakai `whenLoaded()` sehingga generator menulis `allOf: [Resource, {required: [...]}]` | jangan pakai `whenLoaded` untuk field yang selalu ada; controller yang memuat relasinya || `GET` tak punya parameter padahal butuh `business_id` | id dibaca dari badan permintaan | jadikan bagian jalur: `/warung/businesses/{business}/pos` |
 
 Setelah mengubah resource/controller: ekspor ulang, regenerasi, lalu
 `flutter analyze`. Jangan menambal tipe di sisi Dart.
+
+## Mencoba aplikasi tanpa perangkat (web)
+
+Aplikasi yang sama bisa dijalankan di browser — cara tercepat melihat hasilnya
+utuh, tanpa emulator:
+
+```
+flutter build web --dart-define=GOMAD_API_BASE_URL=http://localhost:8200/api
+cd build/web && python3 -m http.server 8300
+# buka http://localhost:8300
+```
+
+Atau mode pengembangan dengan hot reload:
+
+```
+flutter run -d chrome --dart-define=GOMAD_API_BASE_URL=http://localhost:8200/api
+```
+
+Catatan: API harus mengizinkan CORS dari origin aplikasi. Konfigurasi Laravel
+sekarang `Access-Control-Allow-Origin: *`, jadi cukup. Untuk produksi, batasi ke
+domain aplikasi. Tampilan web ini untuk **verifikasi**, bukan target rilis —
+rilisnya tetap APK/ipa.
 
 ## Menjalankan aplikasi
 
